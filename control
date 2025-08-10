@@ -1,0 +1,9 @@
+Package: com.kuaicode.kcmenudemo
+Name: KCMenuDemo
+Version: 0.0.1
+Architecture: iphoneos-arm
+Description: KCMenu's Demo
+Maintainer: KuaiCode
+Author: KuaiCode
+Section: Tweaks
+Depends: mobilesubstrate (>= 0.9.5000)
