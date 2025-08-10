@@ -2,6 +2,11 @@
 
 AI写的仿图层的插件设置模板，使用说明是AI生成的，使用过程中遇到的问题请自行咨询AI
 
+<div style="display: flex; justify-content: space-between;">
+  <img src="https://github.com/user-attachments/assets/fbc226ff-289e-4320-bf3d-8879780f1713" style="width: 35%;" />
+  <img src="https://github.com/user-attachments/assets/24692957-d349-4a10-a849-43e6cf64a7cb" style="width: 35%;" />
+</div>
+
 ## SettingsViewController 使用说明
 
 ### 概述
