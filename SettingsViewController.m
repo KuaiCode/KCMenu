@@ -536,6 +536,79 @@ typedef NS_ENUM(NSUInteger, SettingType) {
         // 刷新分组动画
         NSIndexSet *set = [NSIndexSet indexSetWithIndex:indexPath.section];
         [self.tableView reloadSections:set withRowAnimation:UITableViewRowAnimationFade];
+    } else {
+        // 点击设置项行
+        [self handleSettingItemTapAtIndexPath:indexPath];
+    }
+}
+
+// 处理设置项点击事件
+- (void)handleSettingItemTapAtIndexPath:(NSIndexPath *)indexPath {
+    NSDictionary *sectionData = self.menuSections[indexPath.section];
+    NSArray *subitems = sectionData[@"subitems"];
+    NSDictionary *item = subitems[indexPath.row - 1];
+    
+    SettingType type = [item[@"type"] integerValue];
+    NSString *title = item[@"title"];
+    NSString *key = item[@"key"];
+    
+    switch (type) {
+        case SettingTypeSwitch: {
+            // 点击开关类型行时切换开关状态
+            UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+            if ([cell.accessoryView isKindOfClass:[UISwitch class]]) {
+                UISwitch *sw = (UISwitch *)cell.accessoryView;
+                [sw setOn:!sw.isOn animated:YES];
+                [self switchChanged:sw];
+            }
+            break;
+        }
+        case SettingTypeButton: {
+            // 点击按钮类型行时触发按钮操作
+            UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+            if ([cell.accessoryView isKindOfClass:[UIButton class]]) {
+                UIButton *button = (UIButton *)cell.accessoryView;
+                [self subButtonTapped:button];
+            }
+            break;
+        }
+        case SettingTypeSegmented: {
+            // 点击分段控制行时循环切换选项
+            UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+            UIView *container = cell.accessoryView;
+            for (UIView *subview in container.subviews) {
+                if ([subview isKindOfClass:[UISegmentedControl class]]) {
+                    UISegmentedControl *seg = (UISegmentedControl *)subview;
+                    NSInteger nextIndex = (seg.selectedSegmentIndex + 1) % seg.numberOfSegments;
+                    seg.selectedSegmentIndex = nextIndex;
+                    [self segmentedControlChanged:seg];
+                    break;
+                }
+            }
+            break;
+        }
+        case SettingTypeInfo: {
+            // 点击信息类型行时显示详情
+            NSString *value = item[@"value"] ?: @"无";
+            NSString *detail = item[@"detail"] ?: @"";
+            NSString *message = [NSString stringWithFormat:@"%@\n当前状态: %@", detail, value];
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:title 
+                                                                         message:message 
+                                                                  preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
+            break;
+        }
+        case SettingTypeSlider: {
+            // 滑块类型：显示当前值或提示用户拖动滑块
+            NSString *detail = item[@"detail"] ?: @"拖动滑块调整数值";
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:title 
+                                                                         message:detail 
+                                                                  preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
+            break;
+        }
     }
 }
 
