@@ -1,0 +1,139 @@
+name: Build and Release KCMenu
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 1.0.0)'
+        required: false
+        default: ''
+
+env:
+  THEOS: ${{ github.workspace }}/theos
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Theos
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Theos
+        run: |
+          # 安装 ldid (签名工具)
+          brew install ldid make
+          
+          # 安装 Theos
+          git clone --recursive https://github.com/theos/theos.git $THEOS
+          
+          # 下载 iOS SDK
+          curl -L https://github.com/theos/sdks/archive/master.tar.gz -o sdks.tar.gz
+          mkdir -p $THEOS/sdks
+          tar -xzf sdks.tar.gz --strip-components=1 -C $THEOS/sdks
+          rm sdks.tar.gz
+
+      - name: Build KCMenuDemo Tweak (arm64)
+        run: |
+          cd ${{ github.workspace }}
+          export THEOS=${{ github.workspace }}/theos
+          export PATH=$THEOS/bin:$PATH
+          make clean
+          rm -rf packages/*.deb
+          make package FINALPACKAGE=1 ARCHS="arm64 arm64e" THEOS_PACKAGE_SCHEME=rootless
+          
+          mkdir -p artifacts
+          mv packages/*.deb artifacts/com.kuaicode.kcmenudemo_1.0.0_iphoneos-arm64.deb
+          cp .theos/obj/KCMenuDemo.dylib artifacts/KCMenuDemo.dylib
+
+      - name: Build KCMenuDemo Tweak (arm64e)
+        run: |
+          cd ${{ github.workspace }}
+          export THEOS=${{ github.workspace }}/theos
+          export PATH=$THEOS/bin:$PATH
+          make clean
+          rm -rf packages/*.deb
+          make package FINALPACKAGE=1 ARCHS="arm64 arm64e" THEOS_PACKAGE_SCHEME=rootless THEOS_PACKAGE_INSTALL_PREFIX=/var/jb
+          
+          mv packages/*.deb artifacts/com.kuaicode.kcmenudemo_1.0.0_iphoneos-arm64e.deb
+
+      - name: Build KCMenuDemo Tweak (arm)
+        run: |
+          cd ${{ github.workspace }}
+          export THEOS=${{ github.workspace }}/theos
+          export PATH=$THEOS/bin:$PATH
+          make clean
+          rm -rf packages/*.deb
+          make package FINALPACKAGE=1 ARCHS="arm64 arm64e" THEOS_PACKAGE_SCHEME=
+          
+          mv packages/*.deb artifacts/com.kuaicode.kcmenudemo_1.0.0_iphoneos-arm.deb
+
+      - name: Build KCMenuTest App
+        run: |
+          cd ${{ github.workspace }}/TestApp
+          export THEOS=${{ github.workspace }}/theos
+          export PATH=$THEOS/bin:$PATH
+          make clean
+          make package FINALPACKAGE=1
+          
+          cp packages/*.ipa ../artifacts/
+
+      - name: List artifacts
+        run: |
+          ls -la artifacts/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: KCMenu-builds
+          path: artifacts/*
+          retention-days: 30
+
+      - name: Get version
+        id: get_version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=$(date +%Y%m%d%H%M%S)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', steps.get_version.outputs.VERSION) }}
+          name: ${{ steps.get_version.outputs.VERSION }}
+          body: |
+            ## ${{ steps.get_version.outputs.VERSION }}
+            
+            ### 📦 包含文件
+            
+            #### KCMenuDemo Tweak (.deb)
+            - `*_arm64.deb` - rootless
+            - `*_arm64e.deb` - roothide
+            - `*_arm.deb` - rootful
+            
+            #### KCMenuDemo.dylib
+            - 用于签名注入
+            
+            #### KCMenuTest App
+            - `*.ipa` - 测试应用，可通过 TrollStore 或签名后安装
+          files: |
+            artifacts/*
+          draft: false
+          prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
