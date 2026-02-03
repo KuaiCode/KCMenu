@@ -28,6 +28,10 @@ typedef NS_ENUM(NSUInteger, SettingType) {
 @property (nonatomic, strong) UITableView *tableView;            // 设置项表格
 @property (nonatomic, strong) NSMutableArray<NSMutableDictionary *> *menuSections; // 菜单数据源
 @property (nonatomic, strong) UILabel *authorLabel;               // 作者信息标签
+@property (nonatomic, strong) UISearchBar *searchBar;             // 搜索栏
+@property (nonatomic, strong) NSString *searchText;               // 搜索关键词
+@property (nonatomic, strong) NSMutableArray<NSDictionary *> *searchResults; // 搜索结果
+@property (nonatomic, assign) BOOL isSearching;                   // 是否处于搜索模式
 @end
 
 @implementation SettingsViewController
@@ -114,10 +118,32 @@ typedef NS_ENUM(NSUInteger, SettingType) {
     self.authorLabel.textAlignment = NSTextAlignmentCenter;
     [self.blurView.contentView addSubview:self.authorLabel];
     
-    // MARK: - 表格头部视图 (用户信息卡片)
-    UIView *headerContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableContainer.bounds.size.width, kTableHeaderHeight)];
+    // MARK: - 表格头部视图 (搜索栏 + 用户信息卡片)
+    CGFloat searchBarHeight = 44.0;
+    UIView *headerContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableContainer.bounds.size.width, kTableHeaderHeight + searchBarHeight + 8)];
     
-    UIView *infoCard = [[UIView alloc] initWithFrame:CGRectMake(0, 16, headerContainer.bounds.size.width, kInfoCardHeight)];
+    // 搜索栏容器
+    UIView *searchContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 8, headerContainer.bounds.size.width, searchBarHeight)];
+    searchContainer.backgroundColor = [[UIColor secondarySystemBackgroundColor] colorWithAlphaComponent:0.68];
+    searchContainer.layer.cornerRadius = 12;
+    searchContainer.layer.masksToBounds = YES;
+    [headerContainer addSubview:searchContainer];
+    
+    // 搜索栏
+    self.searchBar = [[UISearchBar alloc] initWithFrame:CGRectMake(0, 0, searchContainer.bounds.size.width, searchBarHeight)];
+    self.searchBar.placeholder = @"搜索设置项...";
+    self.searchBar.delegate = self;
+    self.searchBar.searchBarStyle = UISearchBarStyleMinimal;
+    self.searchBar.backgroundColor = [UIColor clearColor];
+    self.searchBar.barTintColor = [UIColor clearColor];
+    [searchContainer addSubview:self.searchBar];
+    
+    // 初始化搜索相关属性
+    self.searchText = @"";
+    self.searchResults = [NSMutableArray array];
+    self.isSearching = NO;
+    
+    UIView *infoCard = [[UIView alloc] initWithFrame:CGRectMake(0, searchBarHeight + 24, headerContainer.bounds.size.width, kInfoCardHeight)];
     infoCard.backgroundColor = [[UIColor secondarySystemBackgroundColor] colorWithAlphaComponent:0.68];
     infoCard.layer.cornerRadius = 12;
     infoCard.layer.masksToBounds = YES;
@@ -262,11 +288,17 @@ typedef NS_ENUM(NSUInteger, SettingType) {
 #pragma mark - UITableView 数据源方法
 // 分组数量
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    if (self.isSearching) {
+        return self.searchResults.count > 0 ? 1 : 0;
+    }
     return self.menuSections.count;
 }
 
 // 每组行数
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if (self.isSearching) {
+        return self.searchResults.count;
+    }
     NSDictionary *sectionData = self.menuSections[section];
     BOOL expanded = [sectionData[@"expanded"] boolValue]; // 是否展开
     NSArray *subitems = sectionData[@"subitems"];
@@ -292,6 +324,15 @@ typedef NS_ENUM(NSUInteger, SettingType) {
 
 // 行高
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    // 搜索模式下的行高
+    if (self.isSearching) {
+        NSDictionary *item = self.searchResults[indexPath.row];
+        if ([item[@"type"] integerValue] == SettingTypeSlider) {
+            return 70;
+        }
+        return item[@"detail"] ? 54 : kTableCellHeight;
+    }
+    
     NSDictionary *sectionData = self.menuSections[indexPath.section];
     NSArray *subitems = sectionData[@"subitems"];
     
@@ -310,6 +351,12 @@ typedef NS_ENUM(NSUInteger, SettingType) {
 
 // 单元格配置
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    // 搜索模式下直接显示搜索结果
+    if (self.isSearching) {
+        NSDictionary *item = self.searchResults[indexPath.row];
+        return [self searchResultCellForTableView:tableView indexPath:indexPath item:item];
+    }
+    
     NSDictionary *sectionData = self.menuSections[indexPath.section];
     BOOL expanded = [sectionData[@"expanded"] boolValue];
     NSArray *subitems = sectionData[@"subitems"];
@@ -526,6 +573,12 @@ typedef NS_ENUM(NSUInteger, SettingType) {
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     
+    // 搜索模式下处理点击
+    if (self.isSearching) {
+        [self handleSearchResultTapAtIndexPath:indexPath];
+        return;
+    }
+    
     // 点击分组标题行时切换展开/折叠状态
     if (indexPath.row == 0) {
         NSMutableDictionary *sectionData = [self.menuSections[indexPath.section] mutableCopy];
@@ -550,7 +603,6 @@ typedef NS_ENUM(NSUInteger, SettingType) {
     
     SettingType type = [item[@"type"] integerValue];
     NSString *title = item[@"title"];
-    NSString *key = item[@"key"];
     
     switch (type) {
         case SettingTypeSwitch: {
@@ -738,6 +790,338 @@ typedef NS_ENUM(NSUInteger, SettingType) {
     UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
     UIGraphicsEndImageContext();
     return img;
+}
+
+#pragma mark - UISearchBar 代理方法
+// 搜索文本变化
+- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {
+    self.searchText = searchText;
+    
+    if (searchText.length == 0) {
+        // 清空搜索时退出搜索模式
+        self.isSearching = NO;
+        [self.searchResults removeAllObjects];
+    } else {
+        // 进入搜索模式并过滤结果
+        self.isSearching = YES;
+        [self filterSettingsWithSearchText:searchText];
+    }
+    
+    [self.tableView reloadData];
+}
+
+// 点击搜索按钮
+- (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar {
+    [searchBar resignFirstResponder];
+}
+
+// 点击取消按钮
+- (void)searchBarCancelButtonClicked:(UISearchBar *)searchBar {
+    searchBar.text = @"";
+    self.searchText = @"";
+    self.isSearching = NO;
+    [self.searchResults removeAllObjects];
+    [searchBar resignFirstResponder];
+    [self.tableView reloadData];
+}
+
+// 开始编辑
+- (void)searchBarTextDidBeginEditing:(UISearchBar *)searchBar {
+    [searchBar setShowsCancelButton:YES animated:YES];
+}
+
+// 结束编辑
+- (void)searchBarTextDidEndEditing:(UISearchBar *)searchBar {
+    if (searchBar.text.length == 0) {
+        [searchBar setShowsCancelButton:NO animated:YES];
+    }
+}
+
+#pragma mark - 搜索功能实现
+// 过滤设置项
+- (void)filterSettingsWithSearchText:(NSString *)searchText {
+    [self.searchResults removeAllObjects];
+    
+    NSString *lowercaseSearch = [searchText lowercaseString];
+    
+    // 遍历所有分组和设置项
+    for (NSDictionary *sectionData in self.menuSections) {
+        NSString *sectionTitle = sectionData[@"title"];
+        NSArray *subitems = sectionData[@"subitems"];
+        
+        for (NSDictionary *item in subitems) {
+            NSString *title = item[@"title"];
+            NSString *detail = item[@"detail"] ?: @"";
+            
+            // 匹配标题、详情或分组名
+            BOOL titleMatch = [[title lowercaseString] containsString:lowercaseSearch];
+            BOOL detailMatch = [[detail lowercaseString] containsString:lowercaseSearch];
+            BOOL sectionMatch = [[sectionTitle lowercaseString] containsString:lowercaseSearch];
+            
+            if (titleMatch || detailMatch || sectionMatch) {
+                // 创建包含分组信息的搜索结果
+                NSMutableDictionary *result = [item mutableCopy];
+                result[@"sectionTitle"] = sectionTitle;
+                [self.searchResults addObject:result];
+            }
+        }
+    }
+}
+
+// 创建搜索结果单元格
+- (UITableViewCell *)searchResultCellForTableView:(UITableView *)tableView 
+                                       indexPath:(NSIndexPath *)indexPath 
+                                           item:(NSDictionary *)item {
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    cell.backgroundColor = [UIColor clearColor];
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    
+    CGFloat cellHeight = [self tableView:tableView heightForRowAtIndexPath:indexPath];
+    BOOL hasDetail = item[@"detail"] != nil;
+    
+    // 背景卡片视图
+    UIView *cardView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, cellHeight)];
+    cardView.backgroundColor = [[UIColor secondarySystemBackgroundColor] colorWithAlphaComponent:0.68];
+    
+    // 设置圆角
+    if (indexPath.row == 0) {
+        cardView.layer.cornerRadius = 10;
+        cardView.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
+    }
+    if (indexPath.row == (NSInteger)self.searchResults.count - 1) {
+        if (indexPath.row == 0) {
+            cardView.layer.cornerRadius = 10;
+            cardView.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner | 
+                                         kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
+        } else {
+            cardView.layer.cornerRadius = 10;
+            cardView.layer.maskedCorners = kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
+        }
+    }
+    cardView.layer.masksToBounds = YES;
+    [cell.contentView insertSubview:cardView atIndex:0];
+    
+    // 添加分隔线 (非第一行)
+    if (indexPath.row > 0) {
+        UIView *separator = [[UIView alloc] initWithFrame:CGRectMake(12, 0, tableView.bounds.size.width - 24, 0.5)];
+        separator.backgroundColor = [[UIColor separatorColor] colorWithAlphaComponent:0.3];
+        [cell.contentView addSubview:separator];
+    }
+    
+    // 分组标签 (显示来源分组)
+    NSString *sectionTitle = item[@"sectionTitle"];
+    UILabel *sectionLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 4, tableView.bounds.size.width - 100, 14)];
+    sectionLabel.text = sectionTitle;
+    sectionLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightMedium];
+    sectionLabel.textColor = [UIColor systemBlueColor];
+    [cell.contentView addSubview:sectionLabel];
+    
+    // 标题标签
+    UILabel *textLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 18, tableView.bounds.size.width - 100, 20)];
+    textLabel.text = item[@"title"];
+    textLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    textLabel.textColor = [UIColor labelColor];
+    [cell.contentView addSubview:textLabel];
+    
+    // 详细说明标签 (如果有)
+    if (hasDetail) {
+        UILabel *detailLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 36, tableView.bounds.size.width - 100, 16)];
+        detailLabel.text = item[@"detail"];
+        detailLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+        detailLabel.textColor = [UIColor secondaryLabelColor];
+        [cell.contentView addSubview:detailLabel];
+    }
+    
+    // 根据设置项类型创建不同控件
+    SettingType type = [item[@"type"] integerValue];
+    switch (type) {
+        case SettingTypeSwitch: {
+            UISwitch *sw = [[UISwitch alloc] init];
+            sw.transform = CGAffineTransformMakeScale(0.85, 0.85);
+            BOOL on = [[NSUserDefaults standardUserDefaults] boolForKey:item[@"key"]];
+            [sw setOn:on animated:NO];
+            sw.tag = indexPath.row;
+            [sw addTarget:self action:@selector(searchResultSwitchChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = sw;
+            break;
+        }
+        case SettingTypeButton: {
+            UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+            [button setTitle:@"点击" forState:UIControlStateNormal];
+            button.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+            button.tag = indexPath.row;
+            [button addTarget:self action:@selector(searchResultButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
+            cell.accessoryView = button;
+            break;
+        }
+        case SettingTypeSlider: {
+            cell.accessoryView = nil;
+            
+            UILabel *valueLabel = [[UILabel alloc] initWithFrame:CGRectMake(tableView.bounds.size.width - 60, 18, 48, 20)];
+            valueLabel.text = @"50%";
+            valueLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+            valueLabel.textColor = [UIColor secondaryLabelColor];
+            valueLabel.textAlignment = NSTextAlignmentRight;
+            [cell.contentView addSubview:valueLabel];
+            
+            UISlider *slider = [[UISlider alloc] initWithFrame:CGRectMake(12, hasDetail ? 52 : 42, tableView.bounds.size.width - 24, 20)];
+            slider.minimumValue = 0;
+            slider.maximumValue = 100;
+            slider.value = 50;
+            slider.tag = indexPath.row;
+            [slider addTarget:self action:@selector(searchResultSliderChanged:) forControlEvents:UIControlEventValueChanged];
+            [cell.contentView addSubview:slider];
+            break;
+        }
+        case SettingTypeSegmented: {
+            NSArray *options = item[@"options"];
+            UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 140, cellHeight)];
+            UISegmentedControl *segControl = [[UISegmentedControl alloc] initWithItems:options];
+            segControl.frame = CGRectMake(0, (cellHeight - 32) / 2, 140, 32);
+            segControl.selectedSegmentIndex = 0;
+            segControl.tag = indexPath.row;
+            [segControl addTarget:self action:@selector(searchResultSegmentChanged:) forControlEvents:UIControlEventValueChanged];
+            [container addSubview:segControl];
+            cell.accessoryView = container;
+            break;
+        }
+        case SettingTypeInfo: {
+            UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 80, kTableCellHeight)];
+            UILabel *infoLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 9, 80, 20)];
+            infoLabel.text = item[@"value"];
+            infoLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+            infoLabel.textColor = [UIColor secondaryLabelColor];
+            infoLabel.textAlignment = NSTextAlignmentRight;
+            [container addSubview:infoLabel];
+            cell.accessoryView = container;
+            break;
+        }
+    }
+    
+    // 选中状态背景
+    UIView *bgColorView = [[UIView alloc] init];
+    bgColorView.backgroundColor = [[UIColor systemGrayColor] colorWithAlphaComponent:0.2];
+    cell.selectedBackgroundView = bgColorView;
+    
+    return cell;
+}
+
+// 处理搜索结果点击
+- (void)handleSearchResultTapAtIndexPath:(NSIndexPath *)indexPath {
+    NSDictionary *item = self.searchResults[indexPath.row];
+    SettingType type = [item[@"type"] integerValue];
+    NSString *title = item[@"title"];
+    
+    switch (type) {
+        case SettingTypeSwitch: {
+            UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+            if ([cell.accessoryView isKindOfClass:[UISwitch class]]) {
+                UISwitch *sw = (UISwitch *)cell.accessoryView;
+                [sw setOn:!sw.isOn animated:YES];
+                [self searchResultSwitchChanged:sw];
+            }
+            break;
+        }
+        case SettingTypeButton: {
+            UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+            if ([cell.accessoryView isKindOfClass:[UIButton class]]) {
+                UIButton *button = (UIButton *)cell.accessoryView;
+                [self searchResultButtonTapped:button];
+            }
+            break;
+        }
+        case SettingTypeSegmented: {
+            UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+            UIView *container = cell.accessoryView;
+            for (UIView *subview in container.subviews) {
+                if ([subview isKindOfClass:[UISegmentedControl class]]) {
+                    UISegmentedControl *seg = (UISegmentedControl *)subview;
+                    NSInteger nextIndex = (seg.selectedSegmentIndex + 1) % seg.numberOfSegments;
+                    seg.selectedSegmentIndex = nextIndex;
+                    [self searchResultSegmentChanged:seg];
+                    break;
+                }
+            }
+            break;
+        }
+        case SettingTypeInfo: {
+            NSString *value = item[@"value"] ?: @"无";
+            NSString *detail = item[@"detail"] ?: @"";
+            NSString *message = [NSString stringWithFormat:@"%@\n当前状态: %@", detail, value];
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:title 
+                                                                         message:message 
+                                                                  preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
+            break;
+        }
+        case SettingTypeSlider: {
+            NSString *detail = item[@"detail"] ?: @"拖动滑块调整数值";
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:title 
+                                                                         message:detail 
+                                                                  preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
+            break;
+        }
+    }
+}
+
+// 搜索结果中的开关变化
+- (void)searchResultSwitchChanged:(UISwitch *)sw {
+    NSInteger index = sw.tag;
+    if (index < (NSInteger)self.searchResults.count) {
+        NSDictionary *item = self.searchResults[index];
+        NSString *key = item[@"key"];
+        [[NSUserDefaults standardUserDefaults] setBool:sw.isOn forKey:key];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+    }
+}
+
+// 搜索结果中的按钮点击
+- (void)searchResultButtonTapped:(UIButton *)button {
+    NSInteger index = button.tag;
+    if (index < (NSInteger)self.searchResults.count) {
+        NSDictionary *item = self.searchResults[index];
+        NSString *title = item[@"title"];
+        NSString *message = [NSString stringWithFormat:@"按钮被点击: %@", title];
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"操作" 
+                                                                     message:message 
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+    }
+}
+
+// 搜索结果中的滑块变化
+- (void)searchResultSliderChanged:(UISlider *)slider {
+    NSInteger index = slider.tag;
+    if (index < (NSInteger)self.searchResults.count) {
+        NSDictionary *item = self.searchResults[index];
+        NSString *key = item[@"key"];
+        
+        // 更新值标签
+        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:index inSection:0]];
+        for (UIView *view in cell.contentView.subviews) {
+            if ([view isKindOfClass:[UILabel class]] && CGRectGetWidth(view.frame) == 48) {
+                UILabel *valueLabel = (UILabel *)view;
+                valueLabel.text = [NSString stringWithFormat:@"%.0f%%", slider.value];
+                break;
+            }
+        }
+        
+        NSLog(@"Search result slider value changed: %f for key: %@", slider.value, key);
+    }
+}
+
+// 搜索结果中的分段控件变化
+- (void)searchResultSegmentChanged:(UISegmentedControl *)seg {
+    NSInteger index = seg.tag;
+    if (index < (NSInteger)self.searchResults.count) {
+        NSDictionary *item = self.searchResults[index];
+        NSString *key = item[@"key"];
+        NSLog(@"Search result segmented control changed to %ld for key: %@", (long)seg.selectedSegmentIndex, key);
+    }
 }
 
 @end
