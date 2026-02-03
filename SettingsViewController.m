@@ -120,22 +120,27 @@ typedef NS_ENUM(NSUInteger, SettingType) {
     
     // MARK: - 表格头部视图 (搜索栏 + 用户信息卡片)
     CGFloat searchBarHeight = 44.0;
-    UIView *headerContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableContainer.bounds.size.width, kTableHeaderHeight + searchBarHeight + 8)];
+    // headerContainer高度 = 搜索栏区域(8+44) + 间距(8) + 头像卡片(80) + 底部间距(8，与各栏间距一致)
+    UIView *headerContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableContainer.bounds.size.width, 8 + searchBarHeight + 8 + kInfoCardHeight + 8)];
     
-    // 搜索栏容器
+    // 搜索栏容器 (放在头像卡片上方)
     UIView *searchContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 8, headerContainer.bounds.size.width, searchBarHeight)];
-    searchContainer.backgroundColor = [[UIColor secondarySystemBackgroundColor] colorWithAlphaComponent:0.68];
-    searchContainer.layer.cornerRadius = 12;
-    searchContainer.layer.masksToBounds = YES;
+    searchContainer.backgroundColor = [UIColor clearColor];
     [headerContainer addSubview:searchContainer];
     
     // 搜索栏
-    self.searchBar = [[UISearchBar alloc] initWithFrame:CGRectMake(0, 0, searchContainer.bounds.size.width, searchBarHeight)];
+    self.searchBar = [[UISearchBar alloc] initWithFrame:CGRectMake(-8, 0, searchContainer.bounds.size.width + 16, searchBarHeight)];
     self.searchBar.placeholder = @"搜索设置项...";
     self.searchBar.delegate = self;
     self.searchBar.searchBarStyle = UISearchBarStyleMinimal;
     self.searchBar.backgroundColor = [UIColor clearColor];
     self.searchBar.barTintColor = [UIColor clearColor];
+    // 设置搜索框文本框背景为半透明
+    if (@available(iOS 13.0, *)) {
+        self.searchBar.searchTextField.backgroundColor = [[UIColor secondarySystemBackgroundColor] colorWithAlphaComponent:0.68];
+        self.searchBar.searchTextField.layer.cornerRadius = 10;
+        self.searchBar.searchTextField.layer.masksToBounds = YES;
+    }
     [searchContainer addSubview:self.searchBar];
     
     // 初始化搜索相关属性
@@ -143,10 +148,12 @@ typedef NS_ENUM(NSUInteger, SettingType) {
     self.searchResults = [NSMutableArray array];
     self.isSearching = NO;
     
-    UIView *infoCard = [[UIView alloc] initWithFrame:CGRectMake(0, searchBarHeight + 24, headerContainer.bounds.size.width, kInfoCardHeight)];
+    // 用户信息卡片 (放在搜索栏下方)
+    UIView *infoCard = [[UIView alloc] initWithFrame:CGRectMake(0, searchBarHeight + 16, headerContainer.bounds.size.width, kInfoCardHeight)];
     infoCard.backgroundColor = [[UIColor secondarySystemBackgroundColor] colorWithAlphaComponent:0.68];
     infoCard.layer.cornerRadius = 12;
     infoCard.layer.masksToBounds = YES;
+    [headerContainer addSubview:infoCard];
 
     // 用户头像
     UIImageView *avatar = [[UIImageView alloc] initWithFrame:CGRectMake(12, 10, 60, 60)];
@@ -176,8 +183,6 @@ typedef NS_ENUM(NSUInteger, SettingType) {
     hint.font = [UIFont systemFontOfSize:10 weight:UIFontWeightSemibold];
     hint.textColor = [UIColor tertiaryLabelColor];
     [infoCard addSubview:hint];
-    
-    [headerContainer addSubview:infoCard];
     
     // MARK: - 表格视图初始化
     self.tableView = [[UITableView alloc] initWithFrame:CGRectMake(0, 0, 
